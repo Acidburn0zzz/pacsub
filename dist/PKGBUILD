@@ -1,0 +1,23 @@
+# ArchLinux/PacBSD compatible PKGBUILD for pacsub
+
+pkgname=pacsub
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='PacBSD package repository manager'
+arch=('any')
+url='http://github.com/PacBSD/pacsub'
+license=('BSD')
+depends=('perl')
+# FIXME: validpgpkeys=()
+source=("${pkgname}-${pkgver}.tar.gz::http://github.com/PacBSD/${pkgname}/${pkgver}.tar.gz")
+sha1sums=('f8d0dfcb424f1b915a7b1638acd370d43bb2531d')
+
+build() {
+	cd "$pkgname-$pkgver"
+	make
+}
+
+package() {
+	cd "$pkgname-$pkgver"
+	make DESTDIR="$pkgdir" install
+}

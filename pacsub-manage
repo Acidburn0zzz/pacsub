@@ -1,0 +1,644 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use File::Path;
+
+use PacSub::Tools;
+use PacSub::CLI;
+use PacSub::AccessControl;
+use PacSub::Repo;
+use PacSub::User;
+use PacSub::Gpg;
+
+my $acl_commands;
+$acl_commands = {
+	mkhelp($acl_commands),
+	list => {
+		help => 'list permissions',
+		arghelp => '[SUBJECT]',
+		perms => [ ['r', '/acl'] ],
+		code => \&cmd_acl_list,
+	},
+	allow => {
+		help => 'add permissions',
+		arghelp => 'SUBJECT PREDICATE OBJECT',
+		perms => [ ['w', '/acl'] ],
+		code => sub { cmd_acl_add('allow', @_) },
+	},
+	unallow => {
+		help => 'remove allowed permissions',
+		arghelp => 'SUBJECT PREDICATE OBJECT',
+		perms => [ ['w', '/acl'] ],
+		code => sub { cmd_acl_remove('allow', @_) },
+	},
+	deny => {
+		help => 'add denied permissions',
+		arghelp => 'SUBJECT PREDICATE OBJECT',
+		perms => [ ['w', '/acl'] ],
+		code => sub { cmd_acl_add('deny', @_) },
+	},
+	undeny => {
+		help => 'remove denied permissions',
+		arghelp => 'SUBJECT PREDICATE OBJECT',
+		perms => [ ['w', '/acl'] ],
+		code => sub { cmd_acl_remove('deny', @_) },
+	},
+	can => {
+		help => 'check permissions',
+		arghelp => 'SUBJECT PREDICATE OBJECT',
+		perms => [ ['r', '/acl'] ],
+		code => \&cmd_acl_can,
+	},
+};
+
+sub cmd_acl_list(;$) {
+	my ($user) = @_;
+	argdone;
+	for my $rule ($ACL->list()) {
+		my ($type, $subject, $predicate, $object) = @$rule;
+		print("$type $subject:$predicate:$object\n");
+	}
+	return 0;
+}
+
+sub cmd_acl_add($$$$) {
+	my ($type, $subject, $predicate, $object) = @_;
+	die "missing parameters: subject predicate object\n" if !defined($subject);
+	die "missing parameters: predicate object\n" if !defined($predicate);
+	die "missing parameter: object\n" if !defined($object);
+	argdone;
+	$ACL->check('w', "/acl/$subject");
+	$ACL->check($predicate, "/acl/$object");
+	if ($type eq 'allow') {
+		$ACL->allow($subject, $predicate, $object);
+	} elsif ($type eq 'deny') {
+		$ACL->deny($subject, $predicate, $object);
+	} else {
+		die "internal usage error\n";
+	}
+	$ACL->save();
+	return 0;
+}
+
+sub cmd_acl_remove($$$$) {
+	my ($type, $subject, $predicate, $object) = @_;
+	die "missing parameters: subject predicate object\n" if !defined($subject);
+	die "missing parameters: predicate object\n" if !defined($predicate);
+	die "missing parameter: object\n" if !defined($object);
+	argdone;
+	$ACL->check('w', "/acl/$subject");
+	if ($type eq 'deny') {
+		# When we losen permissions on an object we need to have access to it
+		$ACL->check($predicate, "/acl/$object");
+	}
+	$ACL->remove($type, $subject, $predicate, $object);
+	$ACL->save();
+	return 0;
+}
+
+sub cmd_acl_can($$$) {
+	my ($subject, $predicate, $object) = @_;
+	die "missing parameters: subject predicate object\n" if !defined($subject);
+	die "missing parameters: predicate object\n" if !defined($predicate);
+	die "missing parameter: object\n" if !defined($object);
+	argdone;
+	# invert 0 and 1 for the shell
+	return $ACL->can($subject, $predicate, $object) ? 0 : 1;
+}
+
+my $repo_commands;
+$repo_commands = {
+	mkhelp($repo_commands),
+	list => {
+		help => 'list available repositories',
+		perms => [ ['r', '/repo'] ],
+		code => \&cmd_repo_list,
+	},
+	create => {
+		help => 'create a new empty repository',
+		arghelp => 'REPONAME ARCH1 [ARCH2...]',
+		perms => [ ['c', '/repo'] ],
+		code => \&cmd_repo_create,
+	},
+	'add-package' => {
+		help => 'add package files to a repository',
+		arghelp => 'REPO ARCH PKGFILE1 [PKGFILE2...]',
+		perms => [ ['w', '/repo'] ],
+		code => \&cmd_repo_add_package,
+	},
+	'remove-package' => {
+		help => 'remove packages from a repository',
+		arghelp => 'REPO ARCH PKGNAME1 [PKGNAME2...]',
+		perms => [ ['w', '/repo'] ],
+		code => \&cmd_repo_remove_package,
+	},
+};
+
+sub cmd_repo_list() {
+	my @repos = PacSub::Repo->list();
+	for my $repo (@repos) {
+		my $line = "$repo->{name}";
+		$line .= " $_" for @{$repo->{archs}};
+		print "$line\n";
+	}
+	return 0;
+}
+
+sub cmd_repo_create($) {
+	my ($repo, @archs) = @_;
+	die "missing parameters: repo-name, architectures\n" if !defined($repo);
+	die "missing parameter: architecture list\n" if !@archs;
+	argdone;
+	$ACL->check('c', "/repo/$repo");
+	$ACL->check('c', "/arch/$_") for @archs;
+	PacSub::Repo::create($repo, @archs);
+	return 0;
+}
+
+sub repo_add_package($$@) {
+	my ($repo, $arch, @files) = @_;
+	$ACL->check('w', "/repo/$repo");
+	$ACL->check('w', "/arch/$arch");
+	PacSub::Repo::add_package_files($repo, $arch, @files);
+	return 0;
+}
+
+sub cmd_repo_add_package($$@) {
+	my ($repo, $arch, @files) = @_;
+	die "missing parameters: repo arch files\n" if !defined($repo);
+	die "missing parameters: arch files\n" if !defined($arch);
+	die "no files provided\n" if !@files;
+	argdone;
+	$ACL->check('a', '/file');
+	return repo_add_package($repo, $arch, @files);
+}
+
+sub cmd_repo_remove_package($$@) {
+	my ($repo, $arch, @names) = @_;
+	die "missing parameters: repo arch files\n" if !defined($repo);
+	die "missing parameters: arch files\n" if !defined($arch);
+	die "no package names provided\n" if !@names;
+	argdone;
+	$ACL->check('w', "/repo/$repo");
+	$ACL->check('w', "/arch/$arch");
+	PacSub::Repo::remove_packages($repo, $arch, @names);
+	return 0;
+}
+
+my $user_ssh_cmds;
+$user_ssh_cmds = {
+	mkhelp($user_ssh_cmds),
+	list => {
+		help => 'list ssh keys of a user',
+		arghelp => 'USER',
+		perms => [ ['r', '/ssh'] ],
+		code => \&cmd_user_ssh_list,
+	},
+	add => {
+		help => 'add ssh keys to a user (as parameter or read from stdin)',
+		arghelp => 'USER [SSHKEY]',
+		perms => [ ['w', '/ssh'] ],
+		code => \&cmd_user_ssh_add,
+		posthooks => [ \&update_ssh_keys ],
+	},
+	remove => {
+		help => 'remove ssh keys from a user',
+		arghelp => 'USER ID|TEXT [ID2|TEXT2...]',
+		perms => [ ['w', '/ssh'] ],
+		code => \&cmd_user_ssh_remove,
+		posthooks => [ \&update_ssh_keys ],
+	},
+	update => {
+		help => 'update the authorized_keys file',
+		perms => [ ['cw', '/ssh'] ],
+		code => \&cmd_true,
+		posthooks => [ \&update_ssh_keys ],
+	},
+};
+
+sub cmd_true() {
+	return 0;
+}
+
+sub update_ssh_keys() {
+	PacSub::User::update_ssh_authorized_keys();
+}
+
+sub cmd_user_ssh_list($) {
+	my ($user) = @_;
+	die "missing parameter: username\n" if !defined($user);
+	argdone;
+	$ACL->check('r', "/user/$user");
+	my $u = PacSub::User->open($user, 1);
+	my @ssh_keys = $u->ssh_keys();
+	my $id = 0;
+	print($id++ . ": $_\n") for @ssh_keys;
+	return 0;
+}
+
+sub cmd_user_ssh_add($) {
+	my $user = shift;
+	die "missing parameter: username\n" if !defined($user);
+	argdone;
+	$ACL->check('w', "/user/$user");
+	my @keys;
+	if (@_) {
+		push @keys, join(' ', @_);
+	} else {
+		while (defined(my $line = <STDIN>)) {
+			last if $line =~ /^\s*$/;
+			$line =~ s/^\s+//;
+			$line =~ s/\s+$//;
+			push @keys, $line;
+		}
+	}
+	if (@keys) {
+		my $u = PacSub::User->open($user, 1);
+		my $p = PacSub::User->open($user, 1);
+		$u->add_ssh_keys(@keys);
+	}
+	return 0;
+}
+
+sub cmd_user_ssh_remove($@) {
+	my ($user, @keys) = @_;
+	die "missing parameter: username\n" if !defined($user);
+	argdone;
+	$ACL->check('w', "/user/$user");
+	my $u = PacSub::User->open($user, 1);
+	$u->remove_ssh_keys(@keys) if @keys;
+	return 0;
+}
+
+my $user_gpg_cmds;
+$user_gpg_cmds = {
+	mkhelp($user_gpg_cmds),
+	list => {
+		help => 'list gpg keys of a user',
+		arghelp => 'USER',
+		perms => [ ['r', '/gpg'] ],
+		code => \&cmd_user_gpg_list,
+	},
+	add => {
+		help => 'add gpg keys to a user (keyid or gpg packet from stdin)',
+		arghelp => 'USER [KEYID]',
+		perms => [ ['w', '/gpg'] ],
+		code => \&cmd_user_gpg_add,
+	},
+	remove => {
+		help => 'remove gpg keys from a user',
+		arghelp => 'USER KEYID1|ID [KEYID2|ID]',
+		perms => [ ['w', '/gpg'] ],
+		code => \&cmd_user_gpg_remove,
+	},
+};
+
+sub cmd_user_gpg_list($) {
+	my ($user) = @_;
+	die "missing parameter: user\n" if !defined($user);
+	argdone;
+	$ACL->check('r', "/user/$user/gpg");
+
+	my $u = PacSub::User->open($user);
+	my @gpg_keys = $u->gpg_keys();
+	my $id = 0;
+	print($id++ . ": $_\n") for @gpg_keys;
+	return 0;
+}
+
+sub cmd_user_gpg_add($;$) {
+	my ($user, @keyids) = @_;
+	die "missing parameter: user\n" if !defined($user);
+	argdone;
+	$ACL->check('w', "/user/$user/gpg");
+
+	my $u = PacSub::User->open($user);
+	if (@keyids) {
+		@keyids = PacSub::Gpg::recv_keys(@keyids);
+	} else {
+		@keyids = PacSub::Gpg::import_keys_fh(\*STDIN);
+	}
+	if (@keyids) {
+		@keyids = map { $_->{keyid} } @keyids;
+		print("The following keys are now present:\n");
+		print("$_\n") for @keyids;
+		$u->add_gpg_keys(@keyids);
+		return 0;
+	} else {
+		print("No keys found\n");
+		return 1;
+	}
+}
+
+sub cmd_user_gpg_remove($@) {
+	my ($user, @keys) = @_;
+	die "missing parameter: username\n" if !defined($user);
+	argdone;
+	$ACL->check('w', "/user/$user");
+	my $u = PacSub::User->open($user, 1);
+	$u->remove_gpg_keys(@keys) if @keys;
+	return 0;
+}
+
+my $user_commands;
+$user_commands = {
+	mkhelp($user_commands),
+	list => {
+		help => 'list all users',
+		perms => [ ['r', '/user'] ],
+		code => \&cmd_user_list,
+	},
+	create => {
+		help => 'create a new user',
+		arghelp => 'NAME [NAME2...]',
+		perms => [ ['c', '/user'] ],
+		code => \&cmd_user_create,
+		posthooks => [ \&update_ssh_keys ],
+	},
+	remove => {
+		help => 'remove a user',
+		arghelp => 'NAME [NAME2...]',
+		perms => [ ['d', '/user'] ],
+		code => \&cmd_user_remove,
+		posthooks => [ \&update_ssh_keys ],
+	},
+	disable => {
+		help => 'disable a user',
+		arghelp => 'NAME [REASON]',
+		perms => [ ['w', '/user'] ],
+		code => \&cmd_user_disable,
+	},
+	enable => {
+		help => 'enable a user',
+		arghelp => 'NAME [NAME2...]',
+		perms => [ ['w', '/user'] ],
+		code => \&cmd_user_enable,
+	},
+	subcommand(ssh => $user_ssh_cmds, 'add or remove ssh keys to/from a user'),
+	subcommand(gpg => $user_gpg_cmds, 'add or remove gpg keys to/from a user'),
+};
+
+sub cmd_user_list() {
+	my @users = PacSub::User::list(0);
+	for (@users) {
+		my ($name, $disabled) = @$_;
+		if ($disabled) {
+			printf("%-10s disabled\n", $name);
+		} else {
+			printf("$name\n");
+		}
+	}
+	return 0;
+}
+
+sub cmd_user_create(@) {
+	my (@users) = @_;
+	argdone;
+	my $rc = 0;
+	for my $user (@users) {
+		die "invalid username: $user\n" if !PacSub::User::is_legal_name($user);
+		eval {
+			$ACL->check('c', "/user/$user");
+			PacSub::User->create($user);
+		};
+		if ($@) {
+			warn $@;
+			$rc = 1;
+		}
+	}
+	return $rc;
+}
+
+sub cmd_user_remove(@) {
+	my (@users) = @_;
+	argdone;
+	my $rc = 0;
+	for my $user (@users) {
+		eval {
+			$ACL->check('d', "/user/$user");
+			PacSub::User->remove($user);
+		};
+		if ($@) {
+			warn $@;
+			$rc = 1;
+		}
+	}
+	return $rc;
+}
+
+sub set_users_disabled {
+	my ($disabled, @users) = @_;
+	argdone;
+	my $rc = 0;
+	for my $user (@users) {
+		eval {
+			$ACL->check('w', "/user/$user");
+			my $u = PacSub::User->open($user, 1);
+			$u->set_disabled($disabled);
+		};
+		if ($@) {
+			warn $@;
+			$rc = 1;
+		}
+	}
+	return $rc;
+}
+
+sub cmd_user_enable($@) {
+	set_users_disabled(undef, @_);
+}
+
+sub cmd_user_disable($$) {
+	my ($user, $reason) = @_;
+	set_users_disabled($reason // "disabled by $CFG->{user}", $user);
+}
+
+my $gpg_commands;
+$gpg_commands = {
+	mkhelp($gpg_commands),
+	list => {
+		help => 'list all known gpg keys',
+		perms => [ ['r', '/gnupg'] ],
+		code => \&cmd_gpg_list,
+	},
+};
+
+sub cmd_gpg_list() {
+	argdone;
+	my @keys = PacSub::Gpg::pub_keys();
+	for my $key (@keys) {
+		if (my $uidlist = $key->{uids}) {
+			printf("%4s %s %s\n", $key->{length}, $key->{keyid}, $_)
+				for @$uidlist;
+		} else {
+			printf("%4s %s\n", $key->{length}, $key->{keyid});
+		}
+	}
+}
+
+my $file_commands;
+$file_commands = {
+	mkhelp($file_commands),
+	list => {
+		help => 'list user files',
+		arghelp => '[USER]',
+		perms => [ ['r', '/file'] ],
+		code => \&cmd_file_list,
+	},
+	upload => {
+		help => 'upload package files and signatures',
+		arghelp => '[USER]',
+		perms => [ ['w', '/file'] ],
+		code => \&cmd_file_upload,
+	},
+	wipe => {
+		help => 'remove all uploaded files',
+		arghelp => '[USER]',
+		perms => [ ['w', '/file'] ],
+		code => \&cmd_file_wipe,
+	},
+	push => {
+		help => 'push some or all package files to a repository',
+		arghelp => 'REPO ARCH [PKG...]',
+		perms => [ ['rw', '/file'], ['w', '/repo'] ],
+		code => \&cmd_file_push,
+	},
+};
+
+sub cmd_file_list($) {
+	my ($user) = @_;
+	$user //= $CFG->{user};
+	argdone;
+	$ACL->check('r', "/user/$user/files");
+	my $u = PacSub::User->open($user, $ACL->can('a', "/user/$user"));
+	print("$_\n") for $u->list_files();
+	return 0;
+}
+
+sub cmd_file_upload($) {
+	my ($user) = @_;
+	$user //= $CFG->{user};
+	argdone;
+	$ACL->check('w', "/user/$user/files");
+	my $u = PacSub::User->open($user, $ACL->can('a', "/user/$user"));
+	forked {
+		my $filedir = "$u->{path}/files";
+		chdir($filedir) or die "chdir($filedir): $!\n";
+		my $bsdtar = $CFG->{bsdtar};
+		exec({$bsdtar} $bsdtar, '-xvf', '-', '--exclude=*/*')
+		or die "exec failed: $!\n";
+	} afterfork => sub { close STDIN };
+	return 0;
+}
+
+sub cmd_file_wipe($) {
+	my ($user) = @_;
+	$user //= $CFG->{user};
+	argdone;
+	$ACL->check('w', "/user/$user/files");
+	my $u = PacSub::User->open($user, $ACL->can('a', "/user/$user"));
+	forked {
+		my $filedir = "$u->{path}/files";
+		chdir($filedir) or die "chdir($filedir): $!\n";
+		File::Path::remove_tree('./', {
+			keep_root => 1,
+			verbose => 1,
+		});
+	};
+	return 0;
+}
+
+sub cmd_file_push($$@) {
+	my ($repo, $arch, @packages) = @_;
+	die "missing parameters: repo arch [files]\n" if !defined($repo);
+	die "missing parameters: arch [files]\n" if !defined($arch);
+	argdone;
+	my $user = $CFG->{user};
+	my $u = PacSub::User->open($user, $ACL->can('a', "/user/$user"));
+	if (!@packages) {
+		@packages = grep { /\.pkg\.tar\.xz$/ } $u->list_files();
+	}
+	my $filedir = "$u->{path}/files";
+	@packages = map { "$filedir/$_" } @packages;
+	return repo_add_package($repo, $arch, @packages);
+}
+
+my $commands;
+$commands = {
+	mkhelp($commands),
+	subcommand(files => $file_commands, 'manipulate temporary user files'),
+	subcommand(repo => $repo_commands, 'manipulate repositories'),
+	subcommand(user => $user_commands, 'manipulate users'),
+	subcommand(acl => $acl_commands, 'manipulate access permissions'),
+	subcommand(gpg => $gpg_commands, 'inspect the gnupg keyring'),
+	init => {
+		help => 'initialize paths',
+		perms => [ ['w', '/init'] ],
+		code => \&cmd_init,
+	},
+	config => {
+		help => 'print the current configuration to stdout',
+		perms => [ ['r', '/config'] ],
+		code => \&cmd_config,
+	},
+};
+
+sub cmd_init() {
+	my $path = $CFG->path('/');
+
+	my $localdir = sub {
+		my ($dir) = @_;
+		my $path = $CFG->path($dir);
+		print("mkdir $path\n");
+		File::Path::make_path($path);
+	};
+	my $localtouch = sub {
+		my ($file) = @_;
+		my $path = $CFG->path($file);
+		print("touch $path\n");
+		touch($path) or die "failed to create file: $path\n";
+	};
+
+	$localdir->('/user');
+	$localdir->('/gnupg');
+	$localtouch->('/acl');
+
+	my $pkgdir = $CFG->packages();
+	print("mkdir $pkgdir\n");
+	File::Path::make_path($pkgdir);
+
+	chmod(0700, $CFG->path('/gnupg'));
+
+	my $umask = umask(0077);
+	my $mask_guard = guard { umask $umask };
+	print("Writing ".$CFG->path('/gnupg/gpg.conf')."\n");
+	setfile($CFG->path('/gnupg/gpg.conf'), <<'GPGCONF');
+keyid-format long
+no-tty
+no-greeting
+keyserver hkp://pool.sks-keyservers.net
+keyserver-options timeout=10
+GPGCONF
+
+	print("Writing ".$CFG->path('/gnupg/gpg-agent.conf')."\n");
+	setfile($CFG->path('/gnupg/gpg-agent.conf'), <<'AGENTCONF');
+batch
+AGENTCONF
+
+	return 0;
+}
+
+sub cmd_config(;$) {
+	my ($file) = @_;
+	my $fh = \*STDOUT;
+	if (defined($file)) {
+		open $fh, '>', $file or die "open($file): $!\n";
+	}
+	$CFG->print($fh);
+}
+
+my ($cmd, @args) = PacSub::CLI::init(@ARGV);
+PacSub::AccessControl::init();
+exit(PacSub::CLI::run($commands, $cmd, @args));
