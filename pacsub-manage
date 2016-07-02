@@ -621,6 +621,7 @@ sub cmd_init() {
 keyid-format long
 no-tty
 no-greeting
+no-secmem-warning
 keyserver hkp://pool.sks-keyservers.net
 keyserver-options timeout=10
 GPGCONF
