@@ -448,11 +448,13 @@ sub set_users_disabled {
 
 sub cmd_user_enable($@) {
 	set_users_disabled(undef, @_);
+	return 0;
 }
 
 sub cmd_user_disable($$) {
 	my ($user, $reason) = @_;
 	set_users_disabled($reason // "disabled by $CFG->{user}", $user);
+	return 0;
 }
 
 my $gpg_commands;
@@ -476,6 +478,7 @@ sub cmd_gpg_list() {
 			printf("%4s %s\n", $key->{length}, $key->{keyid});
 		}
 	}
+	return 0;
 }
 
 my $file_commands;
