@@ -10,7 +10,7 @@ PKGVER != grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} .* \([0-9.][0-9.]+\)$$' ChangeLog
 DISTDIR := $(PKGNAME)-$(PKGVER)
 
 DISTFILES := \
-	ChangeLog LICENSE \
+	README.md ChangeLog LICENSE \
 	Makefile \
 	pacsub-manage \
 	PacSub/AccessControl.pm \

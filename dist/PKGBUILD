@@ -10,7 +10,7 @@ license=('BSD')
 depends=('perl')
 # FIXME: validpgpkeys=()
 source=("${pkgname}-${pkgver}.tar.gz::http://github.com/PacBSD/${pkgname}/${pkgver}.tar.gz")
-sha1sums=('f8d0dfcb424f1b915a7b1638acd370d43bb2531d')
+sha1sums=('04d14d122810f5bbc148b5b16cefedb5fb25ad7e')
 
 build() {
 	cd "$pkgname-$pkgver"
