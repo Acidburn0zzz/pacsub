@@ -1,4 +1,4 @@
-PERL_VENDORLIB != perl -MConfig -e 'print $$Config{vendorlib}'
+PERL_DEST != perl -MConfig -e 'print $$Config{installvendorlib} || $$Config{installsitelib}'
 
 PREFIX := /usr
 DESTDIR :=
@@ -41,14 +41,14 @@ dist:
 
 .PHONY: install
 install:
-	install -dm755 $(DESTDIR)$(PERL_VENDORLIB)/PacSub
-	install -m644 PacSub/AccessControl.pm $(DESTDIR)$(PERL_VENDORLIB)/PacSub/
-	install -m644 PacSub/CLI.pm           $(DESTDIR)$(PERL_VENDORLIB)/PacSub/
-	install -m644 PacSub/Config.pm        $(DESTDIR)$(PERL_VENDORLIB)/PacSub/
-	install -m644 PacSub/Gpg.pm           $(DESTDIR)$(PERL_VENDORLIB)/PacSub/
-	install -m644 PacSub/Package.pm       $(DESTDIR)$(PERL_VENDORLIB)/PacSub/
-	install -m644 PacSub/Repo.pm          $(DESTDIR)$(PERL_VENDORLIB)/PacSub/
-	install -m644 PacSub/Tools.pm         $(DESTDIR)$(PERL_VENDORLIB)/PacSub/
-	install -m644 PacSub/User.pm          $(DESTDIR)$(PERL_VENDORLIB)/PacSub/
+	install -dm755 $(DESTDIR)$(PERL_DEST)/PacSub
+	install -m644 PacSub/AccessControl.pm $(DESTDIR)$(PERL_DEST)/PacSub/
+	install -m644 PacSub/CLI.pm           $(DESTDIR)$(PERL_DEST)/PacSub/
+	install -m644 PacSub/Config.pm        $(DESTDIR)$(PERL_DEST)/PacSub/
+	install -m644 PacSub/Gpg.pm           $(DESTDIR)$(PERL_DEST)/PacSub/
+	install -m644 PacSub/Package.pm       $(DESTDIR)$(PERL_DEST)/PacSub/
+	install -m644 PacSub/Repo.pm          $(DESTDIR)$(PERL_DEST)/PacSub/
+	install -m644 PacSub/Tools.pm         $(DESTDIR)$(PERL_DEST)/PacSub/
+	install -m644 PacSub/User.pm          $(DESTDIR)$(PERL_DEST)/PacSub/
 	install -dm755 $(DESTDIR)$(BINDIR)
 	install -m755 pacsub-manage $(DESTDIR)$(BINDIR)/pacsub-manage
